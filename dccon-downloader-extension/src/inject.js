@@ -4,52 +4,103 @@ var onClickDownload = (e) => {
   const title = document.querySelector('div.info_viewtxt h4.font_blue').innerText
   let list = Array.from(document.querySelectorAll('ul.dccon_list img'));
   var zip = new JSZip();
+
   const getExt = (char) => {
     if(char === '/') return 'jpg';
     if(char === 'i') return 'png';
     if(char === 'R') return 'gif';
+    return 'png';
   }
-  Promise.all(list.map(dccon => {
-    const {title, src} = dccon;
-    let ext = "gif";
-    return fetch(src,{
-      mode: 'no-cors',
-      headers: {
-        'accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'referer': window.location.href,
-        'host': 'dcimg5.dcinside.com', 
-        'Sec-Fetch-Dest': 'image',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'same-site',
-      },
-    })
-    .then( res => {
-      ext = res.headers.get("Content-Type");
-      return res.blob();
-    })
-    .then(blob => new Promise( (resolve, reject) => {
-      const reader = new FileReader;
-      reader.onerror = e => reject(e);
-      reader.onload = () => {
-        const result = reader.result;
-        zip.file(`${title}.${getExt(result.charAt(result.indexOf(',')+1))}`,blob);
-        resolve();
-      }
-      reader.readAsDataURL(blob);
-    }))
-  }))
-  .then(res => {
-    zip.generateAsync({type:"blob"})
-    .then(function(content) {
-        const zipUrl = URL.createObjectURL(content);
-        document.querySelector('button.dccon-downloader').innerText = "다운받기"
-        document.querySelector('button.dccon-downloader').setAttribute('disabled', "false")
-        chrome.runtime.sendMessage({title, zipUrl});
+
+  Promise.all(list.map((img, index) => {
+    const fileName = img.alt || img.title || `image_${index}`;
+    const imgSrc = img.src;
+
+    return new Promise((resolve, reject) => {
+      const newImg = new Image();
+      newImg.crossOrigin = 'anonymous';
+
+      newImg.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = newImg.naturalWidth || newImg.width;
+        canvas.height = newImg.naturalHeight || newImg.height;
+
+        ctx.drawImage(newImg, 0, 0);
+
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error(`Failed to convert ${fileName}`));
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            const ext = getExt(result.charAt(result.indexOf(',')+1));
+            zip.file(`${fileName}.${ext}`, blob);
+            resolve();
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      };
+
+      newImg.onerror = () => reject(new Error(`Failed to load ${fileName}`));
+      newImg.src = imgSrc;
     });
+  }))
+  .then(() => {
+    return zip.generateAsync({type:"blob"});
+  })
+  .then((content) => {
+    const zipUrl = URL.createObjectURL(content);
+    document.querySelector('button.dccon-downloader').innerText = "다운받기"
+    document.querySelector('button.dccon-downloader').setAttribute('disabled', "false")
+
+    try {
+      chrome.runtime.sendMessage({title, zipUrl}, (response) => {
+        if (chrome.runtime.lastError) {
+          const a = document.createElement('a');
+          a.href = zipUrl;
+          a.download = title + '.zip';
+          a.click();
+        }
+      });
+    } catch (e) {
+      const a = document.createElement('a');
+      a.href = zipUrl;
+      a.download = title + '.zip';
+      a.click();
+    }
   })
   .catch(e => {
-    console.error(e);
-  })
+    document.querySelector('button.dccon-downloader').innerText = "다운받기"
+    document.querySelector('button.dccon-downloader').setAttribute('disabled', "false")
+    alert('다운로드 실패: ' + e.message);
+  });
+}
+
+function addDownloadButton() {
+  if (document.querySelector('.dccon-downloader')) return;
+
+  let purchase_button = document.querySelector('.btn_buy');
+  if (!purchase_button) return;
+
+  let download_button = document.createElement("button");
+  download_button.setAttribute('type', 'button');
+  download_button.setAttribute('class', 'btn_blue small dccon-downloader');
+  download_button.onclick = onClickDownload;
+  download_button.innerText = "다운받기";
+
+  purchase_button.insertAdjacentElement("beforebegin", download_button);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', addDownloadButton);
+} else {
+  addDownloadButton();
 }
 
 document.addEventListener("click", function(e) {
@@ -57,24 +108,26 @@ document.addEventListener("click", function(e) {
       (e.target.className !== 'dcon_frame blue_brd') &&
       (e.target.className !== 'dcon_frame red_brd') ) return;
 
-  let download_button = document.createElement("button")
-  download_button.setAttribute('type', 'button')
-  download_button.setAttribute('class', 'btn_blue small dccon-downloader')
-  download_button.onclick = onClickDownload;
-  download_button.innerText = "다운받기"
-
   var observer = new MutationObserver(function (mutations, me) {
-    let dccon_window = document.getElementsByClassName('dccon_popinfo')
+    let dccon_window = document.querySelector('.info_viewtxt');
     if (dccon_window) {
-      let purchase_button = document.querySelector('.btn_blue.small.btn_buy')
-      purchase_button.insertAdjacentElement("beforebegin", download_button)
+      addDownloadButton();
       me.disconnect();
       return;
     }
   });
-  
+
   observer.observe(document, {
     childList: true,
     subtree: true
   });
 }, false);
+
+const globalObserver = new MutationObserver(() => {
+  addDownloadButton();
+});
+
+globalObserver.observe(document.body, {
+  childList: true,
+  subtree: true
+});
