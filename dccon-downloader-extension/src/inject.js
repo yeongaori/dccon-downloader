@@ -58,22 +58,7 @@ var onClickDownload = (e) => {
     const zipUrl = URL.createObjectURL(content);
     document.querySelector('button.dccon-downloader').innerText = "다운받기"
     document.querySelector('button.dccon-downloader').setAttribute('disabled', "false")
-
-    try {
-      chrome.runtime.sendMessage({title, zipUrl}, (response) => {
-        if (chrome.runtime.lastError) {
-          const a = document.createElement('a');
-          a.href = zipUrl;
-          a.download = title + '.zip';
-          a.click();
-        }
-      });
-    } catch (e) {
-      const a = document.createElement('a');
-      a.href = zipUrl;
-      a.download = title + '.zip';
-      a.click();
-    }
+    chrome.runtime.sendMessage({title, zipUrl});
   })
   .catch(e => {
     document.querySelector('button.dccon-downloader').innerText = "다운받기"
